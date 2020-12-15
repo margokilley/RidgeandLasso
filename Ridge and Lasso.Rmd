@@ -1,0 +1,261 @@
+---
+title: "Margo Killey"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+```{r}
+library(ISLR)
+data("College")
+library(dplyr)
+library(leaps)
+library(boot)
+library(glmnet)
+```
+
+3.a) Going to remove Accept and Apps from the dataset and add a variable Accept/Apps
+
+```{r}
+College <- College %>% mutate(Accept_Apps = Accept / Apps)
+College <- College[-c(2, 3)]
+```
+
+Now splitting data into testing and training dataseats. 
+```{r}
+set.seed(234)
+train_size <- floor(nrow(College) * 0.7)
+train_id <- sample(1:nrow(College), train_size)
+trainCollege <- College[train_id, ]
+testCollege <- College[-train_id, ]
+```
+
+Now plotting Accept/Apps against all variables: Private is our only factor variable so that will be a box plot, everything else will be a scatterplot. 
+To me, it seems that Top10Perc, Top25Perc, Room.Board, Terminal, and GradRate look the most predictive due to their linear relationships in the scatterplots with Accept_Apps. Also, PrivateYes seems to have a higher mean than PrivateNo when compared with Accept_Apps, so that could also be a predictive variable. 
+```{r}
+
+pairs(Accept_Apps ~ Enroll + Top10perc + Top25perc + F.Undergrad + P.Undergrad, data = trainCollege)
+pairs(Accept_Apps ~ Outstate + Room.Board + Books + Personal + PhD, data = trainCollege)
+pairs(Accept_Apps ~ Terminal + S.F.Ratio + perc.alumni + Expend + Grad.Rate, data = trainCollege)
+
+plot(trainCollege$Private, trainCollege$Accept_Apps)
+```
+3.b) Going to fit a linear model using least squares on the trianing set, report training and test error with all variables as predictors. 
+
+```{r}
+fit_OLS <- glm(Accept_Apps ~ ., data = trainCollege)
+train_predict <- predict.lm(fit_OLS, trainCollege)
+test_predict <- predict.lm(fit_OLS, testCollege)
+
+trainMSE_OLS <- mean((train_predict - trainCollege$Accept_Apps)^2)
+testMSE_OLS <- mean((test_predict - testCollege$Accept_Apps)^2)
+
+trainMSE_OLS
+testMSE_OLS
+```
+So, you can see my training error is 0.0134, and my testing error is 0.0162. 
+
+3.c) Now going to use AIC, BIC, and adjusted R squared to select potentially smaller models. 
+```{r}
+regfit.full <- regsubsets(Accept_Apps ~ ., data = trainCollege, 
+                          nvmax = ncol(trainCollege) - 1)
+
+regfit.Summary = summary(regfit.full)
+
+names(regfit.Summary)
+
+```
+
+```{r}
+par(mfrow=c(2,2))
+
+## Adjusted R-square
+plot(regfit.Summary$adjr2, xlab="Number of Variables", ylab="Adjusted RSq",type="l",
+main = 'Adjusted R-square')
+best_adjr2 = which.max(regfit.Summary$adjr2)
+abline(v=best_adjr2, lty = 2, col = 'red')
+best_adjr2
+
+## Mallow's Cp (which in linear regression is the AIC)
+plot(regfit.Summary$cp, xlab="Number of Variables", ylab="Cp", type='l',
+main = 'Mallows Cp')
+best_cp = which.min(regfit.Summary$cp)
+abline(v=best_cp, lty = 2, col = 'red')
+best_cp
+
+## BIC
+plot(regfit.Summary$bic, xlab="Number of Variables", ylab="BIC", type='l',
+main = 'BIC')
+best_bic = which.min(regfit.Summary$bic)
+abline(v = best_bic, lty = 2, col = 'red')
+best_bic
+```
+So you can see, my adjusted R squared test chose a model with 12 predictors, my AIC chose a model with 8 predictors, and my BIC chose a model with 6 predictors. 
+```{r}
+##My predictors in my adjusted r squared 
+regfit.Summary$which[12,] 
+##my predictors in my AIC 
+regfit.Summary$which[8,]
+##my predictors in bic
+regfit.Summary$which[6,]
+```
+Below, model 1 is my chosen model from R-squared, model2 is from AIC, and model3 is from BIC. 
+```{r}
+##adj R2 model
+model1 <- glm(Accept_Apps ~ Private + Enroll + Top10perc + F.Undergrad + 
+                P.Undergrad + Outstate + Room.Board + Books + Terminal + 
+                S.F.Ratio + Expend + Grad.Rate, data = trainCollege)
+
+##AIC model
+model2 <- glm(Accept_Apps ~ Private + Enroll + Top10perc + Outstate + 
+                Room.Board + Books + Expend + Grad.Rate, data = trainCollege)
+
+##BIC model 
+model3 <- glm(Accept_Apps ~ Private + Top10perc + Outstate + Room.Board + 
+                Expend + Grad.Rate, data = trainCollege)
+
+train_predict_model1 <- predict.lm(model1, trainCollege)
+train_predict_model2 <- predict.lm(model2, trainCollege)
+train_predict_model3 <- predict.lm(model3, trainCollege)
+
+
+
+train_error_model1 <- mean((train_predict_model1 - trainCollege$Accept_Apps)^2)
+train_error_model1
+
+train_error_model2 <- mean((train_predict_model2 - trainCollege$Accept_Apps)^2)
+train_error_model2
+
+train_error_model3 <- mean((train_predict_model3 - trainCollege$Accept_Apps)^2)
+train_error_model3
+
+test_predict_model1 <- predict.lm(model1, testCollege)
+test_predcit_model2 <- predict.lm(model2, testCollege)
+test_predcit_model3 <- predict.lm(model3, testCollege)
+
+test_error_model1 <- mean((test_predict_model1 - testCollege$Accept_Apps)^2)
+test_error_model1
+
+test_error_model2 <- mean((test_predcit_model2 - testCollege$Accept_Apps)^2)
+test_error_model2
+
+test_error_model3 <- mean((test_predcit_model3 - testCollege$Accept_Apps)^2)
+test_error_model3
+```
+So above, my training errors for adjusted R sqaured, AIC, and BIC chosen models are 0.0134, 0.0136, and 0.0138 respectively.
+My testing errors for those respectively are 0.0156, 0.0163, and 0.0166. 
+
+3.d) Going to use 5 fold CV to estimate test error from training data for models in c and b. 
+
+```{r}
+cv.err_fitOLS <- cv.glm(trainCollege, fit_OLS, K = 5)
+cv.err_fitOLS$delta[1]
+
+cv.err_mod1 <- cv.glm(trainCollege, model1, K = 5)
+cv.err_mod1$delta[1]
+
+cv.err_mod2 <- cv.glm(trainCollege, model2, K = 5)
+cv.err_mod2$delta[1]
+
+cv.err_mod3 <- cv.glm(trainCollege, model3, K = 5)
+cv.err_mod3$delta[1]
+```
+So: in order from lowest to highest CV estimated testing error is 0.01432 for AIC, 0.01434 for the original all predictor model, 0.01439 for my BIC model, and then 0.01449 for my adjusted R squared model. 
+So when just looking at testing error on the test set, adjusted R squared had the lowest testing error, but when calculating a predicted testing error using the training data with 5-fold CV, my AIC 8 predictor model had the lowest estimated testing error. 
+3.e) Fit a ridge regression model on the training set. I am going to do this with my adjusted R squared chosen model, since it has the lowest testing error. 
+
+```{r}
+grid = 10^seq(10, -2, length=100)
+X = model.matrix(Accept_Apps ~ Private + Enroll + Top10perc + F.Undergrad + 
+                P.Undergrad + Outstate + Room.Board + Books + Terminal + 
+                S.F.Ratio + Expend + Grad.Rate, data = trainCollege)[, -1]
+y_train = trainCollege$Accept_Apps
+X_test = model.matrix(Accept_Apps ~ Private + Enroll + Top10perc + F.Undergrad + 
+                P.Undergrad + Outstate + Room.Board + Books + Terminal + 
+                S.F.Ratio + Expend + Grad.Rate, data = testCollege)[, -1]
+y_test = testCollege$Accept_Apps
+
+cv.out = cv.glmnet(X, y_train, alpha = 0, lambda = grid)
+plot(cv.out)
+
+bestlam = cv.out$lambda.min
+bestlam
+
+ridge.mod = glmnet(X, y_train, alpha = 0, lambda = grid)
+plot(ridge.mod, xvar = "lambda", label = TRUE)
+
+
+ridge.pred_train = predict(ridge.mod, s = bestlam, newx = X)
+mean((ridge.pred_train - y_train)^2)
+
+ridge.pred_test = predict(ridge.mod, s = bestlam, newx = X_test)
+mean((ridge.pred_test - y_test)^2)
+
+lambda.grid = cv.out$lambda # grid of lambdas used by cv.glmnet()
+mses = cv.out$cvm # mean crossvalidated error (MSE) for each lambda (averaged over the 10 folds)
+cv_error = mses[which(lambda.grid == bestlam)] # this is the crossvalidated error (MSE)
+print(cv_error)
+
+```
+So above: my lambda chosen by my 10-fold CV is 0.01. The training error is 0.01353, testing error is 0.0156, and my CV error is 0.0141
+
+3.f) Fitting a lasso model on training set. 
+```{r}
+lasso.mod = glmnet(X, y_train, alpha=1, lambda=grid)
+
+# plot lasso paths
+par(mfrow = c(1, 2))
+plot(lasso.mod) # plot w/ L1 norm
+plot(lasso.mod, xvar = "lambda", label = TRUE) # plot w/ lambda
+
+set.seed(1)
+cv.out = cv.glmnet(X, y_train, alpha=1)
+plot(cv.out)
+bestlam = cv.out$lambda.min
+bestlam
+
+
+lasso.pred_train = predict(lasso.mod, s = bestlam ,newx = X)
+mean((lasso.pred_train - y_train)^2)
+
+lasso.pred_test = predict(lasso.mod, s=bestlam, newx = X_test)
+mean((lasso.pred_test - y_test)^2)
+
+lasso.coef = predict(lasso.mod, type = "coefficients", s = bestlam)
+lasso.coef
+
+```
+The coefficients kept in the model are Private, Top10perc, Room.Board, Books, Expend, and Grad.Rate. 
+My training error is 0.0144, and my testing error is 0.0165. 
+
+3.g) Going to compare all of my models below by testing error. OLS (one chosen by adj R squared because lowest testing error out of all), my Ridge, and my Lasso models. 
+```{r}
+models = c("OLS - adj R^2", "Ridge Regression", "Lasso")
+
+train_error_all = c(
+  train_error_model1, 
+  mean((ridge.pred_train - y_train)^2), 
+  mean((lasso.pred_train - y_train)^2)
+)
+
+test_error_all = c(
+  test_error_model1, 
+  mean((ridge.pred_test - y_test)^2), 
+  mean((lasso.pred_test - y_test)^2)
+)
+
+results = data.frame(
+models,
+train_error_all,
+test_error_all
+)
+
+colnames(results) = c("Model", "Train Error", "Test Error")
+print(results)
+```
+So as you can see above, my adjusted R squared just barely has the lowest testing error, second is ridge regression, and lastly is the lasso method. OLS also has the lowest training error, which makes sense because OLS is the model with the highest flexibility. However, overall, the testing errors between these three models are extremely close, with the smallest (OLS) and largest (Lasso) only differeng by 0.001. So, since all testing errors are so low, I would say that we can predict acceptance rate overall extremely well. I would recommend the OLS for this dataset because it has the lowest testing error out of all of the models we tested. 
+
+
+
+
+
